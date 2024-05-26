@@ -16,11 +16,13 @@ include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 FetchContent_Declare(glfw          URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz)
 FetchContent_Declare(imgui         URL https://github.com/ocornut/imgui/archive/refs/tags/v1.90.6.tar.gz)
+FetchContent_Declare(stb           URL https://github.com/nothings/stb/archive/refs/heads/master.tar.gz)
 FetchContent_Declare(volk          URL https://github.com/zeux/volk/archive/refs/tags/1.3.270.tar.gz)
 FetchContent_Declare(vulkanh       URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.3.285.tar.gz)
 FetchContent_Declare(vulkanhpp     URL https://github.com/KhronosGroup/Vulkan-Hpp/archive/refs/tags/v1.3.285.tar.gz)
 FetchContent_MakeAvailable(glfw)
 FetchContent_MakeAvailable(imgui)
+FetchContent_MakeAvailable(stb)
 FetchContent_MakeAvailable(volk)
 FetchContent_MakeAvailable(vulkanh)
 FetchContent_GetProperties(vulkanhpp)
@@ -31,18 +33,21 @@ add_executable(neon)
 
 set_property(TARGET neon PROPERTY CXX_STANDARD 20)
 
-file(GLOB_RECURSE neon_source "src/*.cpp")
+file(GLOB_RECURSE neon_source "source/*.cpp")
 file(GLOB imgui_source "${imgui_SOURCE_DIR}/*.cpp")
 target_sources(neon PRIVATE
   "${neon_source}"
   "${imgui_source}"
   "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
   "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp"
-  "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
+  "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp" "source/renderers/renderer.cpp")
 
 target_include_directories(neon PRIVATE
+  "include"
+  "${glfw_SOURCE_DIR}"
   "${imgui_SOURCE_DIR}"
   "${imgui_SOURCE_DIR}/backends"
+  "${stb_SOURCE_DIR}"
   "${vulkanhpp_SOURCE_DIR}/include")
 
 target_link_libraries(neon PRIVATE

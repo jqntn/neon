@@ -1,23 +1,7 @@
-// Dear ImGui: standalone example application for Glfw + Vulkan
-
-// Learn about Dear ImGui:
-// - FAQ                  https://dearimgui.com/faq
-// - Getting Started      https://dearimgui.com/getting-started
-// - Documentation        https://dearimgui.com/docs (same as your local docs/
-// folder).
-// - Introduction, links and more at the top of imgui.cpp
-
-// Important note to the reader who wish to integrate imgui_impl_vulkan.cpp/.h
-// in their own engine/app.
-// - Common ImGui_ImplVulkan_XXX functions and structures are used to interface
-// with imgui_impl_vulkan.cpp/.h.
-//   You will use those if you want to use this rendering backend in your
-//   engine/app.
-// - Helper ImGui_ImplVulkanH_XXX functions and structures are only used by this
-// example (main.cpp) and by
-//   the backend itself (imgui_impl_vulkan.cpp), but should PROBABLY NOT be used
-//   by your own engine/app code.
-// Read comments in imgui_impl_vulkan.h.
+#include <neon/backends/backend_config.hpp>
+#include <neon/backends/i_backend.hpp>
+#include <neon/backends/vulkan_backend.hpp>
+#include <neon/renderers/renderer.hpp>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -30,23 +14,15 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdint>
+#include <cstring>
 #include <malloc.h>
+#include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <type_traits>
 
 #define IMGUI_IMPL_VULKAN_USE_VOLK
-
-// [Win32] Our example includes a copy of glfw3.lib pre-compiled with VS2010 to
-// maximize ease of testing and compatibility with old VS compilers. To link
-// with VS2010-era libraries, VS2015+ requires linking with
-// legacy_stdio_definitions.lib, which we do using this pragma. Your own project
-// should not be affected, as you are likely to link with a newer binary of GLFW
-// that is adequate for your version of Visual Studio.
-#if defined(_MSC_VER) && (_MSC_VER >= 1900) &&                                 \
-  !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
-#pragma comment(lib, "legacy_stdio_definitions")
-#endif
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -68,11 +44,6 @@ static ImGui_ImplVulkanH_Window g_MainWindowData;
 static int g_MinImageCount = 2;
 static bool g_SwapChainRebuild = false;
 
-static void
-glfw_error_callback(int error, const char* description)
-{
-  fprintf(stderr, "GLFW Error %d: %s\n", error, description);
-}
 static void
 check_vk_result(VkResult err)
 {
@@ -155,6 +126,12 @@ SetupVulkan(ImVector<const char*> instance_extensions)
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
   volkInitialize();
 #endif
+
+  uint32_t version = volkGetInstanceVersion();
+  printf("Vulkan version %d.%d.%d initialized.\n",
+         VK_VERSION_MAJOR(version),
+         VK_VERSION_MINOR(version),
+         VK_VERSION_PATCH(version));
 
   // Create Vulkan Instance
   {
@@ -293,7 +270,7 @@ SetupVulkan(ImVector<const char*> instance_extensions)
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pool_info.maxSets = 1;
+    pool_info.maxSets = sizeof(uint64_t);
     pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
     err = vkCreateDescriptorPool(
@@ -492,16 +469,13 @@ FramePresent(ImGui_ImplVulkanH_Window* wd)
     wd->SemaphoreCount; // Now we can use the next set of semaphores
 }
 
-// Main code
-int
-vulkan_init()
+namespace neon {
+void
+VulkanBackend::init(const BackendConfig& config)
 {
-  VkResult r;
-  uint32_t version;
-  void* ptr;
+  m_p_renderer = std::move(config.p_renderer);
 
-  /* This won't compile if the appropriate Vulkan platform define isn't set. */
-  ptr =
+  void* ptr =
 #if defined(_WIN32)
     &vkCreateWin32SurfaceKHR;
 #elif defined(__linux__) || defined(__unix__)
@@ -509,36 +483,43 @@ vulkan_init()
 #elif defined(__APPLE__)
     &vkCreateMacOSSurfaceMVK;
 #else
-    /* Platform not recogized for testing. */
     NULL;
 #endif
 
-  /* Try to initialize volk. This might not work on CI builds, but the
-   * above should have compiled at least. */
-  r = volkInitialize();
-  if (r != VK_SUCCESS) {
-    printf("volkInitialize failed!\n");
-    return -1;
+  glfwSetErrorCallback([](int error_code, const char* description) {
+    std::fprintf(stderr, "GLFW Error %d: %s\n", error_code, description);
+  });
+
+  if (GLFW_FALSE == glfwInit()) {
+    std::abort();
   }
-
-  version = volkGetInstanceVersion();
-  printf("Vulkan version %d.%d.%d initialized.\n",
-         VK_VERSION_MAJOR(version),
-         VK_VERSION_MINOR(version),
-         VK_VERSION_PATCH(version));
-
-  glfwSetErrorCallback(glfw_error_callback);
-  if (!glfwInit())
-    return 1;
 
   // Create window with Vulkan context
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  GLFWwindow* window = glfwCreateWindow(
-    1280, 720, "Dear ImGui GLFW+Vulkan example", nullptr, nullptr);
+  m_p_window = glfwCreateWindow(config.window_width,
+                                config.window_height,
+                                config.window_title,
+                                nullptr,
+                                nullptr);
   if (!glfwVulkanSupported()) {
     printf("GLFW: Vulkan Not Supported\n");
-    return 1;
+    abort();
   }
+
+  int monitor_x, monitor_y;
+  GLFWmonitor** pp_monitors = glfwGetMonitors(&monitor_x);
+  if (nullptr == pp_monitors) {
+    std::abort();
+  }
+  const GLFWvidmode* p_video_mode = glfwGetVideoMode(pp_monitors[0]);
+  if (nullptr == p_video_mode) {
+    std::abort();
+  }
+  glfwGetMonitorPos(pp_monitors[0], &monitor_x, &monitor_y);
+  glfwSetWindowPos(
+    m_p_window,
+    monitor_x + (p_video_mode->width - config.window_width) * 0.5f,
+    monitor_y + (p_video_mode->height - config.window_height) * 0.5f);
 
   ImVector<const char*> extensions;
   uint32_t extensions_count = 0;
@@ -551,18 +532,20 @@ vulkan_init()
   // Create Window Surface
   VkSurfaceKHR surface;
   VkResult err =
-    glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface);
+    glfwCreateWindowSurface(g_Instance, m_p_window, g_Allocator, &surface);
   check_vk_result(err);
 
   // Create Framebuffers
   int w, h;
-  glfwGetFramebufferSize(window, &w, &h);
+  glfwGetFramebufferSize(m_p_window, &w, &h);
   ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
   SetupVulkanWindow(wd, surface, w, h);
 
   // Setup Dear ImGui context
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  ImGui::StyleColorsLight();
+
   ImGuiIO& io = ImGui::GetIO();
   (void)io;
   io.ConfigFlags |=
@@ -570,12 +553,8 @@ vulkan_init()
   io.ConfigFlags |=
     ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
 
-  // Setup Dear ImGui style
-  ImGui::StyleColorsDark();
-  // ImGui::StyleColorsLight();
-
   // Setup Platform/Renderer backends
-  ImGui_ImplGlfw_InitForVulkan(window, true);
+  ImGui_ImplGlfw_InitForVulkan(m_p_window, true);
   ImGui_ImplVulkan_InitInfo init_info = {};
   init_info.Instance = g_Instance;
   init_info.PhysicalDevice = g_PhysicalDevice;
@@ -619,13 +598,15 @@ vulkan_init()
   // io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f,
   // nullptr, io.Fonts->GetGlyphRangesJapanese()); IM_ASSERT(font != nullptr);
 
-  // Our state
-  bool show_demo_window = true;
-  bool show_another_window = false;
-  ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+  if (nullptr != m_p_renderer) {
+    m_p_renderer->init();
+  }
+}
 
-  // Main loop
-  while (!glfwWindowShouldClose(window)) {
+void
+VulkanBackend::run()
+{
+  while (!glfwWindowShouldClose(m_p_window)) {
     // Poll and handle events (inputs, window resize, etc.)
     // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to
     // tell if dear imgui wants to use your inputs.
@@ -637,10 +618,14 @@ vulkan_init()
     // and hide them from your application based on those two flags.
     glfwPollEvents();
 
+    ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
     // Resize swap chain?
     if (g_SwapChainRebuild) {
       int width, height;
-      glfwGetFramebufferSize(window, &width, &height);
+      glfwGetFramebufferSize(m_p_window, &width, &height);
       if (width > 0 && height > 0) {
         ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
         ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance,
@@ -662,59 +647,8 @@ vulkan_init()
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // 1. Show the big demo window (Most of the sample code is in
-    // ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear
-    // ImGui!).
-    if (show_demo_window)
-      ImGui::ShowDemoWindow(&show_demo_window);
-
-    // 2. Show a simple window that we create ourselves. We use a Begin/End pair
-    // to create a named window.
-    {
-      static float f = 0.0f;
-      static int counter = 0;
-
-      ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!"
-                                     // and append into it.
-
-      ImGui::Text("This is some useful text."); // Display some text (you can
-                                                // use a format strings too)
-      ImGui::Checkbox(
-        "Demo Window",
-        &show_demo_window); // Edit bools storing our window open/close state
-      ImGui::Checkbox("Another Window", &show_another_window);
-
-      ImGui::SliderFloat("float",
-                         &f,
-                         0.0f,
-                         1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-      ImGui::ColorEdit3(
-        "clear color",
-        (float*)&clear_color); // Edit 3 floats representing a color
-
-      if (ImGui::Button("Button")) // Buttons return true when clicked (most
-                                   // widgets return true when edited/activated)
-        counter++;
-      ImGui::SameLine();
-      ImGui::Text("counter = %d", counter);
-
-      ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
-                  1000.0f / io.Framerate,
-                  io.Framerate);
-      ImGui::End();
-    }
-
-    // 3. Show another simple window.
-    if (show_another_window) {
-      ImGui::Begin(
-        "Another Window",
-        &show_another_window); // Pass a pointer to our bool variable (the
-                               // window will have a closing button that will
-                               // clear the bool when clicked)
-      ImGui::Text("Hello from another window!");
-      if (ImGui::Button("Close Me"))
-        show_another_window = false;
-      ImGui::End();
+    if (nullptr != m_p_renderer) {
+      m_p_renderer->render();
     }
 
     // Rendering
@@ -732,8 +666,12 @@ vulkan_init()
     }
   }
 
+  if (nullptr != m_p_renderer) {
+    m_p_renderer->shutdown();
+  }
+
   // Cleanup
-  err = vkDeviceWaitIdle(g_Device);
+  VkResult err = vkDeviceWaitIdle(g_Device);
   check_vk_result(err);
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();
@@ -742,8 +680,265 @@ vulkan_init()
   CleanupVulkanWindow();
   CleanupVulkan();
 
-  glfwDestroyWindow(window);
+  glfwDestroyWindow(m_p_window);
   glfwTerminate();
+}
 
-  return 0;
+// Helper function to find Vulkan memory type bits. See
+// ImGui_ImplVulkan_MemoryType() in imgui_impl_vulkan.cpp
+static uint32_t
+findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
+{
+  VkPhysicalDeviceMemoryProperties mem_properties;
+  vkGetPhysicalDeviceMemoryProperties(g_PhysicalDevice, &mem_properties);
+
+  for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++)
+    if ((type_filter & (1 << i)) &&
+        (mem_properties.memoryTypes[i].propertyFlags & properties) ==
+          properties)
+      return i;
+
+  return 0xFFFFFFFF; // Unable to find memoryType
+}
+
+Texture
+VulkanBackend::load_texture(const uint8_t* pixels,
+                            uint32_t width,
+                            uint32_t height) const
+{
+  Texture texture;
+
+  size_t image_size = static_cast<size_t>(width * height * 4);
+
+  VkResult err;
+
+  // Create the Vulkan image.
+  {
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    info.extent.width = width;
+    info.extent.height = height;
+    info.extent.depth = 1;
+    info.mipLevels = 1;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    err = vkCreateImage(g_Device, &info, g_Allocator, &texture.vk_image);
+    check_vk_result(err);
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(g_Device, texture.vk_image, &req);
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = req.size;
+    alloc_info.memoryTypeIndex =
+      findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    err = vkAllocateMemory(
+      g_Device, &alloc_info, g_Allocator, &texture.vk_image_memory);
+    check_vk_result(err);
+    err =
+      vkBindImageMemory(g_Device, texture.vk_image, texture.vk_image_memory, 0);
+    check_vk_result(err);
+  }
+
+  // Create the Image View
+  {
+    VkImageViewCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.image = texture.vk_image;
+    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.layerCount = 1;
+    err =
+      vkCreateImageView(g_Device, &info, g_Allocator, &texture.vk_image_view);
+    check_vk_result(err);
+  }
+
+  // Create Sampler
+  {
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.addressModeU =
+      VK_SAMPLER_ADDRESS_MODE_REPEAT; // outside image bounds just use border
+                                      // color
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.minLod = -1000;
+    sampler_info.maxLod = 1000;
+    sampler_info.maxAnisotropy = 1.0f;
+    err = vkCreateSampler(
+      g_Device, &sampler_info, g_Allocator, &texture.vk_sampler);
+    check_vk_result(err);
+  }
+
+  // Create Descriptor Set using ImGUI's implementation
+  texture.ds =
+    ImGui_ImplVulkan_AddTexture(texture.vk_sampler,
+                                texture.vk_image_view,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+  // Create Upload Buffer
+  {
+    VkBufferCreateInfo buffer_info = {};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = image_size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    err = vkCreateBuffer(
+      g_Device, &buffer_info, g_Allocator, &texture.vk_upload_buffer);
+    check_vk_result(err);
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(g_Device, texture.vk_upload_buffer, &req);
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = req.size;
+    alloc_info.memoryTypeIndex =
+      findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    err = vkAllocateMemory(
+      g_Device, &alloc_info, g_Allocator, &texture.vk_upload_buffer_memory);
+    check_vk_result(err);
+    err = vkBindBufferMemory(
+      g_Device, texture.vk_upload_buffer, texture.vk_upload_buffer_memory, 0);
+    check_vk_result(err);
+  }
+
+  // Upload to Buffer:
+  {
+    void* map = NULL;
+    err = vkMapMemory(
+      g_Device, texture.vk_upload_buffer_memory, 0, image_size, 0, &map);
+    check_vk_result(err);
+    memcpy(map, pixels, image_size);
+    VkMappedMemoryRange range[1] = {};
+    range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    range[0].memory = texture.vk_upload_buffer_memory;
+    range[0].size = image_size;
+    err = vkFlushMappedMemoryRanges(g_Device, 1, range);
+    check_vk_result(err);
+    vkUnmapMemory(g_Device, texture.vk_upload_buffer_memory);
+  }
+
+  // Create a command buffer that will perform following steps when hit in the
+  // command queue.
+  // TODO: this works in the example, but may need input if this is an
+  // acceptable way to access the pool/create the command buffer.
+  VkCommandPool command_pool =
+    g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
+  VkCommandBuffer command_buffer;
+  {
+    VkCommandBufferAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandPool = command_pool;
+    alloc_info.commandBufferCount = 1;
+
+    err = vkAllocateCommandBuffers(g_Device, &alloc_info, &command_buffer);
+    check_vk_result(err);
+
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    err = vkBeginCommandBuffer(command_buffer, &begin_info);
+    check_vk_result(err);
+  }
+
+  // Copy to Image
+  {
+    VkImageMemoryBarrier copy_barrier[1] = {};
+    copy_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    copy_barrier[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    copy_barrier[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    copy_barrier[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    copy_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    copy_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    copy_barrier[0].image = texture.vk_image;
+    copy_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_barrier[0].subresourceRange.levelCount = 1;
+    copy_barrier[0].subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0,
+                         0,
+                         NULL,
+                         0,
+                         NULL,
+                         1,
+                         copy_barrier);
+
+    VkBufferImageCopy region = {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width = width;
+    region.imageExtent.height = height;
+    region.imageExtent.depth = 1;
+    vkCmdCopyBufferToImage(command_buffer,
+                           texture.vk_upload_buffer,
+                           texture.vk_image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1,
+                           &region);
+
+    VkImageMemoryBarrier use_barrier[1] = {};
+    use_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    use_barrier[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    use_barrier[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    use_barrier[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    use_barrier[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    use_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    use_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    use_barrier[0].image = texture.vk_image;
+    use_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    use_barrier[0].subresourceRange.levelCount = 1;
+    use_barrier[0].subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0,
+                         0,
+                         NULL,
+                         0,
+                         NULL,
+                         1,
+                         use_barrier);
+  }
+
+  // End command buffer
+  {
+    VkSubmitInfo end_info = {};
+    end_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    end_info.commandBufferCount = 1;
+    end_info.pCommandBuffers = &command_buffer;
+    err = vkEndCommandBuffer(command_buffer);
+    check_vk_result(err);
+    err = vkQueueSubmit(g_Queue, 1, &end_info, VK_NULL_HANDLE);
+    check_vk_result(err);
+    err = vkDeviceWaitIdle(g_Device);
+    check_vk_result(err);
+  }
+
+  return texture;
+}
+
+void
+VulkanBackend::unload_texture(const Texture& texture) const
+{
+  vkFreeMemory(g_Device, texture.vk_upload_buffer_memory, nullptr);
+  vkDestroyBuffer(g_Device, texture.vk_upload_buffer, nullptr);
+  vkDestroySampler(g_Device, texture.vk_sampler, nullptr);
+  vkDestroyImageView(g_Device, texture.vk_image_view, nullptr);
+  vkDestroyImage(g_Device, texture.vk_image, nullptr);
+  vkFreeMemory(g_Device, texture.vk_image_memory, nullptr);
+
+  ImGui_ImplVulkan_RemoveTexture(texture.ds);
+}
 }
