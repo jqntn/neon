@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <glm/ext/vector_float4.hpp>
 #include <neon/backends/i_backend.hpp>
 #include <neon/renderers/renderer.hpp>
+#include <vector>
 
 namespace neon {
 class IBackend;
@@ -17,9 +19,12 @@ public:
   void shutdown() override;
 
 private:
-  uint32_t image_width = 256;
-  uint32_t image_height = 256;
+  void set_pixel(std::vector<uint8_t>& pixels,
+                 const glm::vec4& color,
+                 size_t index) const;
 
-  Texture image_texture;
+  float m_render_scale = 1.0f;
+
+  Texture m_render_texture;
 };
 }

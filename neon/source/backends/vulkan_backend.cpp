@@ -15,14 +15,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <malloc.h>
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <type_traits>
-
-#define IMGUI_IMPL_VULKAN_USE_VOLK
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -120,18 +120,20 @@ SetupVulkan_SelectPhysicalDevice()
 }
 
 static void
-SetupVulkan(ImVector<const char*> instance_extensions)
+SetupVulkan(ImVector<const char*> instance_extensions, GLFWwindow* m_p_window)
 {
   VkResult err;
-#ifdef IMGUI_IMPL_VULKAN_USE_VOLK
-  volkInitialize();
-#endif
 
-  uint32_t version = volkGetInstanceVersion();
-  printf("Vulkan version %d.%d.%d initialized.\n",
-         VK_VERSION_MAJOR(version),
-         VK_VERSION_MINOR(version),
-         VK_VERSION_PATCH(version));
+  volkInitialize();
+
+  uint32_t instance_version = volkGetInstanceVersion();
+  std::string version = std::format("{}.{}.{}",
+                                    VK_VERSION_MAJOR(instance_version),
+                                    VK_VERSION_MINOR(instance_version),
+                                    VK_VERSION_PATCH(instance_version));
+  std::string old_title = glfwGetWindowTitle(m_p_window);
+  std::string new_title = std::format("{} (Vulkan {})", old_title, version);
+  glfwSetWindowTitle(m_p_window, new_title.c_str());
 
   // Create Vulkan Instance
   {
@@ -174,13 +176,12 @@ SetupVulkan(ImVector<const char*> instance_extensions)
     create_info.ppEnabledExtensionNames = instance_extensions.Data;
     err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
     check_vk_result(err);
-#ifdef IMGUI_IMPL_VULKAN_USE_VOLK
+
     volkLoadInstance(g_Instance);
 
     ImGui_ImplVulkan_LoadFunctions([](const char* function_name, void*) {
       return vkGetInstanceProcAddr(volkGetLoadedInstance(), function_name);
     });
-#endif
 
     // Setup the debug report callback
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
@@ -270,7 +271,7 @@ SetupVulkan(ImVector<const char*> instance_extensions)
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pool_info.maxSets = sizeof(uint64_t);
+    pool_info.maxSets = 2;
     pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
     err = vkCreateDescriptorPool(
@@ -506,8 +507,8 @@ VulkanBackend::init(const BackendConfig& config)
     abort();
   }
 
-  int monitor_x, monitor_y;
-  GLFWmonitor** pp_monitors = glfwGetMonitors(&monitor_x);
+  int count;
+  GLFWmonitor** pp_monitors = glfwGetMonitors(&count);
   if (nullptr == pp_monitors) {
     std::abort();
   }
@@ -515,6 +516,8 @@ VulkanBackend::init(const BackendConfig& config)
   if (nullptr == p_video_mode) {
     std::abort();
   }
+
+  int monitor_x, monitor_y;
   glfwGetMonitorPos(pp_monitors[0], &monitor_x, &monitor_y);
   glfwSetWindowPos(
     m_p_window,
@@ -527,7 +530,7 @@ VulkanBackend::init(const BackendConfig& config)
     glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
-  SetupVulkan(extensions);
+  SetupVulkan(extensions, m_p_window);
 
   // Create Window Surface
   VkSurfaceKHR surface;
@@ -597,6 +600,11 @@ VulkanBackend::init(const BackendConfig& config)
   // ImFont* font =
   // io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f,
   // nullptr, io.Fonts->GetGlyphRangesJapanese()); IM_ASSERT(font != nullptr);
+
+  ImGui_ImplVulkan_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+  ImGui::Render();
 
   if (nullptr != m_p_renderer) {
     m_p_renderer->init();
@@ -932,6 +940,10 @@ VulkanBackend::load_texture(const uint8_t* pixels,
 void
 VulkanBackend::unload_texture(const Texture& texture) const
 {
+  if (nullptr == texture.ds) {
+    return;
+  }
+
   vkFreeMemory(g_Device, texture.vk_upload_buffer_memory, nullptr);
   vkDestroyBuffer(g_Device, texture.vk_upload_buffer, nullptr);
   vkDestroySampler(g_Device, texture.vk_sampler, nullptr);

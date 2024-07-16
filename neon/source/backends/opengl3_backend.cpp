@@ -13,9 +13,11 @@
 
 #define GL_SILENCE_DEPRECATION
 #include <GLFW/glfw3.h>
+#include <format>
 #include <gl/GL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 
 namespace neon {
 void
@@ -46,8 +48,8 @@ OpenGL3Backend::init(const BackendConfig& config)
     std::abort();
   }
 
-  int monitor_x, monitor_y;
-  GLFWmonitor** pp_monitors = glfwGetMonitors(&monitor_x);
+  int count;
+  GLFWmonitor** pp_monitors = glfwGetMonitors(&count);
   if (nullptr == pp_monitors) {
     std::abort();
   }
@@ -55,6 +57,8 @@ OpenGL3Backend::init(const BackendConfig& config)
   if (nullptr == p_video_mode) {
     std::abort();
   }
+
+  int monitor_x, monitor_y;
   glfwGetMonitorPos(pp_monitors[0], &monitor_x, &monitor_y);
   glfwSetWindowPos(
     m_p_window,
@@ -68,8 +72,17 @@ OpenGL3Backend::init(const BackendConfig& config)
   ImGui::CreateContext();
   ImGui::StyleColorsLight();
 
-  ImGui_ImplGlfw_InitForOpenGL(m_p_window, true);
-  ImGui_ImplOpenGL3_Init(glsl_version);
+  if (!ImGui_ImplGlfw_InitForOpenGL(m_p_window, true)) {
+    std::abort();
+  }
+  if (!ImGui_ImplOpenGL3_Init(glsl_version)) {
+    std::abort();
+  }
+
+  std::string version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  std::string old_title = glfwGetWindowTitle(m_p_window);
+  std::string new_title = std::format("{} (OpenGL {})", old_title, version);
+  glfwSetWindowTitle(m_p_window, new_title.c_str());
 
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
@@ -80,6 +93,11 @@ OpenGL3Backend::init(const BackendConfig& config)
                clear_color.y * clear_color.w,
                clear_color.z * clear_color.w,
                clear_color.w);
+
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+  ImGui::Render();
 
   if (nullptr != m_p_renderer) {
     m_p_renderer->init();
@@ -129,10 +147,10 @@ OpenGL3Backend::load_texture(const uint8_t* pixels,
                              uint32_t width,
                              uint32_t height) const
 {
-  GLuint texture;
+  GLuint id;
 
-  glGenTextures(1, &texture);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  glGenTextures(1, &id);
+  glBindTexture(GL_TEXTURE_2D, id);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexImage2D(GL_TEXTURE_2D,
@@ -146,12 +164,19 @@ OpenGL3Backend::load_texture(const uint8_t* pixels,
                pixels);
 
   return Texture{
-    .ds = reinterpret_cast<VkDescriptorSet>(texture),
+    .ds = reinterpret_cast<VkDescriptorSet>(id),
   };
 }
 
 void
 OpenGL3Backend::unload_texture(const Texture& texture) const
 {
+  if (nullptr == texture.ds) {
+    return;
+  }
+
+  GLuint id = reinterpret_cast<GLuint>(texture.ds);
+
+  glDeleteTextures(1, &id);
 }
 }

@@ -8,8 +8,8 @@
 int
 main()
 {
-  neon::OpenGL3Backend backend;
-  // neon::VulkanBackend backend;
+  // neon::OpenGL3Backend backend;
+  neon::VulkanBackend backend;
 
   neon::BackendConfig config{
     .window_width = 1280,
