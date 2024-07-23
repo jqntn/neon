@@ -2,7 +2,7 @@
 
 namespace neon {
 Renderer::Renderer(const IBackend& backend)
-  : backend(backend)
+  : m_backend(backend)
 {
 }
 }

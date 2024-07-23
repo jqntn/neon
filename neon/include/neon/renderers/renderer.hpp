@@ -13,6 +13,6 @@ public:
   virtual void shutdown() = 0;
 
 protected:
-  const IBackend& backend;
+  const IBackend& m_backend;
 };
 }

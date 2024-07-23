@@ -37,10 +37,10 @@ BasicRaytracer::render()
     }
   }
 
-  backend.unload_texture(m_render_texture);
+  m_backend.unload_texture(m_render_texture);
 
   m_render_texture =
-    backend.load_texture(pixels.data(), render_width, render_height);
+    m_backend.load_texture(pixels.data(), render_width, render_height);
 
   ImGui::GetBackgroundDrawList()->AddImage(
     m_render_texture.ds, ImVec2(), ImGui::GetMainViewport()->WorkSize);
@@ -49,7 +49,7 @@ BasicRaytracer::render()
 void
 BasicRaytracer::shutdown()
 {
-  backend.unload_texture(m_render_texture);
+  m_backend.unload_texture(m_render_texture);
 }
 
 void
