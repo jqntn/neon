@@ -42,7 +42,7 @@ target_sources(neon PRIVATE
   "${imgui_source}"
   "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
   "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp"
-  "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp" "source/renderers/renderer.cpp")
+  "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
 
 target_include_directories(neon PRIVATE
   "include"
